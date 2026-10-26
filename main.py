@@ -6,10 +6,10 @@ from typing import Optional
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import whisper
+from faster_whisper import WhisperModel
 import requests
 
-app = FastAPI(title="Biên Bản Số - Cloud AI Proxy")
+app = FastAPI(title="Biên Bản Số - Lightweight Cloud AI")
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,12 +20,13 @@ app.add_middleware(
 )
 
 ACCESS_TOKEN = os.getenv("ACCESS_TOKEN", "")
-MODEL_NAME = os.getenv("WHISPER_MODEL", "base")
+MODEL_NAME = os.getenv("WHISPER_MODEL", "tiny")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-print(f"Đang tải mô hình Whisper ({MODEL_NAME})...")
-whisper_model = whisper.load_model(MODEL_NAME)
-print("-> Mô hình Whisper đã sẵn sàng!")
+# Sử dụng faster-whisper tối ưu int8: chạy cực nhanh và chỉ tốn ~150MB RAM (hoàn toàn an toàn trong 512MB của Render)
+print(f"Đang tải mô hình Faster-Whisper ({MODEL_NAME}, int8)...")
+whisper_model = WhisperModel(MODEL_NAME, device="cpu", compute_type="int8")
+print("-> Mô hình Faster-Whisper đã sẵn sàng!")
 
 def check_auth(authorization: Optional[str]):
     if ACCESS_TOKEN:
@@ -36,8 +37,9 @@ def check_auth(authorization: Optional[str]):
 def health_check():
     return {
         "status": "online",
-        "service": "Bien Ban So Cloud AI",
+        "service": "Bien Ban So Lightweight Cloud AI",
         "whisper_model": MODEL_NAME,
+        "engine": "faster-whisper-int8",
         "auth_required": bool(ACCESS_TOKEN),
     }
 
@@ -55,37 +57,30 @@ async def transcribe_audio(
         tmp_path = tmp.name
 
     try:
-        result = whisper_model.transcribe(
+        # Faster-whisper phiên bản tối ưu int8
+        segments_gen, _ = whisper_model.transcribe(
             tmp_path,
             language="vi",
-            task="transcribe",
-            verbose=False,
+            beam_size=1,
+            best_of=1,
+            temperature=0.0,
         )
 
         segments = []
-        for s in result.get("segments", []):
-            text = s.get("text", "").strip()
+        for s in segments_gen:
+            text = s.text.strip()
             if text:
                 segments.append({
-                    "start": float(s.get("start", 0)),
-                    "end": float(s.get("end", 0)),
+                    "start": float(s.start),
+                    "end": float(s.end),
                     "text": text,
                     "speaker": None,
                     "uncertain": False,
                 })
 
-        if not segments and result.get("text", "").strip():
-            segments.append({
-                "start": 0.0,
-                "end": 1.0,
-                "text": result.get("text", "").strip(),
-                "speaker": None,
-                "uncertain": False,
-            })
-
         return {"segments": segments}
     except Exception as e:
-        print(f"Lỗi: {e}")
+        print(f"Lỗi chép lời: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if os.path.exists(tmp_path):
@@ -120,7 +115,7 @@ async def generate_draft(
         except Exception as e:
             print(f"Lỗi Gemini: {e}")
 
-    # Fallback tự động
+    # Fallback tự động không cần LLM
     fallback_blocks = [
         {
             "kind": "heading",
@@ -153,4 +148,5 @@ async def generate_draft(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+    port = int(os.getenv("PORT", 10000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
