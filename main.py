@@ -102,6 +102,13 @@ GEMINI_THINKING_BUDGET = int(os.getenv("GEMINI_THINKING_BUDGET", "0"))
 GEMINI_TIMEOUT = int(os.getenv("GEMINI_TIMEOUT", "120"))
 
 print(f"Chế độ chép lời: {STT_PROVIDER.upper()}" + (f" ({GROQ_MODEL})" if STT_PROVIDER == "groq" else f" ({MODEL_NAME}, {COMPUTE_TYPE})"))
+
+_LOCAL_STT_AVAILABLE = importlib.util.find_spec("faster_whisper") is not None
+if STT_PROVIDER == "local" and not _LOCAL_STT_AVAILABLE:
+    print(
+        "CẢNH BÁO: đang ở chế độ local nhưng chưa cài faster-whisper → /transcribe sẽ trả lỗi 503. "
+        "Hãy thêm GROQ_API_KEY + STT_PROVIDER=groq (khuyến nghị), hoặc cài requirements-local.txt."
+    )
 if STT_PROVIDER == "local" and MODEL_NAME == "tiny":
     print(
         "CẢNH BÁO: model 'tiny' có độ chính xác tiếng Việt rất thấp. "
@@ -138,7 +145,7 @@ def get_local_model():
 
 
 # Nếu chạy local, tải model trong nền để request đầu tiên không phải chờ quá lâu.
-if STT_PROVIDER == "local":
+if STT_PROVIDER == "local" and _LOCAL_STT_AVAILABLE:
     threading.Thread(target=get_local_model, daemon=True).start()
 
 # Giới hạn số phép suy luận đồng thời để không nổ RAM trên gói miễn phí.
@@ -332,7 +339,7 @@ def health_check():
         "beam_size": BEAM_SIZE,
         "vad_filter": STT_PROVIDER == "local",
         "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
-        "local_stt_installed": importlib.util.find_spec("faster_whisper") is not None,
+        "local_stt_installed": _LOCAL_STT_AVAILABLE,
         "auth_required": bool(ACCESS_TOKEN),
         "gemini_model": GEMINI_MODEL if GEMINI_API_KEY else None,
     }
@@ -346,6 +353,14 @@ async def transcribe_audio(
     authorization: Optional[str] = Header(None),
 ):
     check_auth(authorization)
+    if STT_PROVIDER == "local" and not _LOCAL_STT_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Máy chủ chưa cấu hình GROQ_API_KEY và không cài model chép lời local. "
+                "Vào Render → Environment, thêm GROQ_API_KEY và đặt STT_PROVIDER=groq rồi deploy lại."
+            ),
+        )
 
     suffix = os.path.splitext(file.filename or "")[1] or ".m4a"
     tmp_path = ""
