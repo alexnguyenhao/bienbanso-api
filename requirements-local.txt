@@ -1,0 +1,5 @@
+# Cài thêm nếu muốn chạy model local (STT_PROVIDER=local) thay vì Groq:
+#   pip install -r requirements-local.txt
+-r requirements.txt
+faster-whisper>=1.0.0
+onnxruntime>=1.17.0

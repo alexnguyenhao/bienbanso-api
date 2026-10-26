@@ -1,0 +1,28 @@
+# Render Blueprint cho backend Biên Bản Số (repo này chính là thư mục gốc).
+# Chỉ dùng khi tạo service MỚI bằng "New → Blueprint".
+# Nếu service đã tồn tại (tạo thủ công), bỏ qua tệp này và nhập biến môi trường
+# trực tiếp trong Dashboard → Environment.
+services:
+  - type: web
+    name: bienbanso-api
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /
+    envVars:
+      - key: STT_PROVIDER
+        value: groq
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: whisper-large-v3
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash
+      - key: ACCESS_TOKEN
+        sync: false
+      - key: GEMINI_THINKING_BUDGET
+        value: "0"
